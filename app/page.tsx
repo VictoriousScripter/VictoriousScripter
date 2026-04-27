@@ -15,9 +15,10 @@ export default function BrowserAgentPage() {
   const [progress, setProgress] = useState<number | null>(null)
   const [latestAction, setLatestAction] = useState<AgentAction | null>(null)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [input, setInput] = useState('')
   const abortControllerRef = useRef<AbortController | null>(null)
 
-  const { messages, input, setInput, sendMessage, status, setMessages } = useChat({
+  const { messages, sendMessage, status, setMessages } = useChat({
     transport: new DefaultChatTransport({
       api: '/api/browser-agent',
       prepareSendMessagesRequest: ({ messages }) => ({
