@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import { BrowserFrame } from '@/components/browser-frame'
@@ -17,39 +17,55 @@ export default function BrowserAgentPage() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [input, setInput] = useState('')
   const abortControllerRef = useRef<AbortController | null>(null)
+  const pageInfoRef = useRef<PageInfo | null>(null)
+
+  // Keep ref in sync with state for use in transport
+  useEffect(() => {
+    pageInfoRef.current = pageInfo
+  }, [pageInfo])
+
+  // Memoize transport to prevent recreation on every render
+  const transport = useMemo(() => new DefaultChatTransport({
+    api: '/api/browser-agent',
+    prepareSendMessagesRequest: ({ messages }) => ({
+      body: {
+        messages,
+        pageInfo: pageInfoRef.current,
+      },
+    }),
+  }), [])
 
   const { messages, sendMessage, status, setMessages } = useChat({
-    transport: new DefaultChatTransport({
-      api: '/api/browser-agent',
-      prepareSendMessagesRequest: ({ messages }) => ({
-        body: {
-          messages,
-          pageInfo,
-        },
-      }),
-    }),
+    transport,
     onToolCall: ({ toolCall }) => {
-      // Handle tool calls from the agent
-      const args = toolCall.args as AgentAction
+      // Handle tool calls from the agent - toolCall.args is the tool input
+      const args = toolCall.args as Record<string, unknown>
+      const action = args.action as string | undefined
       
-      if (args.action === 'progress') {
-        setCurrentAction(args.message || null)
-        setProgress(args.percentComplete ?? null)
-      } else if (args.action === 'complete') {
+      if (action === 'progress' || toolCall.toolName === 'reportProgress') {
+        setCurrentAction((args.message as string) || null)
+        setProgress((args.percentComplete as number) ?? null)
+      } else if (action === 'complete' || toolCall.toolName === 'taskComplete') {
         setAgentStatus('completed')
-        setCurrentAction(args.summary || 'Task completed')
+        setCurrentAction((args.summary as string) || 'Task completed')
         setProgress(100)
       } else {
-        setCurrentAction(args.description || args.message || `Executing ${args.action}`)
-        setLatestAction(args)
+        const description = (args.description as string) || (args.message as string) || `Executing ${toolCall.toolName}`
+        setCurrentAction(description)
+        setLatestAction({
+          action: toolCall.toolName,
+          description,
+          selector: args.selector as string | undefined,
+          text: args.text as string | undefined,
+          url: args.url as string | undefined,
+        } as AgentAction)
       }
     },
     onFinish: () => {
-      if (agentStatus === 'running') {
-        setAgentStatus('completed')
-      }
+      setAgentStatus((prev) => prev === 'running' ? 'completed' : prev)
     },
-    onError: () => {
+    onError: (error) => {
+      console.error('[v0] Chat error:', error)
       setAgentStatus('error')
       setCurrentAction('An error occurred')
     },
